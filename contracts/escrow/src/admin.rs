@@ -567,6 +567,10 @@ impl Escrow {
         )
         .map_err(|_| ContractError::IndexOutOfBounds)?;
 
+        if ledgers < MIN_TTL_EXTENSION {
+            return Err(ContractError::InvalidTtlExtension);
+        }
+
         let old_ledgers = storage::get_ttl_extension(&env);
         env.storage()
             .instance()
@@ -1046,6 +1050,9 @@ impl Escrow {
         caller.require_auth();
         if caller != admin {
             return Err(ContractError::NotAuthorized);
+        }
+        if extension_seconds < MIN_TTL_EXTENSION {
+            return Err(ContractError::InvalidTtlExtension);
         }
         env.storage()
             .instance()
