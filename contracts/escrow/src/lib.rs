@@ -276,6 +276,7 @@ mod test_helpers;
 mod test_initialize_twice;
 mod test_initialize_zero_admin;
 mod test_malicious_token;
+mod test_messaging;
 mod test_minimum_amount_guard;
 mod test_multi_asset;
 mod test_multi_resolver;
