@@ -24,4 +24,14 @@ fuzz_target!(|data: (u64, u32)| {
         // 4. Run delivery confirmation executions wrapped safely inside the test runtime
         let _result = client.confirm_delivery(&order_id, &mock_merchant);
     }
+<<<<<<< HEAD
+=======
+
+    h.env.ledger().set_timestamp(r.timestamp());
+
+    let caller = h.actor(r.u8());
+    let target_id = r.target_id(escrow_id);
+
+    let _ = h.client.try_confirm_delivery(&caller, &target_id);
+>>>>>>> origin/main
 });
