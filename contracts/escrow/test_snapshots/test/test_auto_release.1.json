@@ -831,7 +831,7 @@
                               "symbol": "arbitration_fee_bps"
                             },
                             "val": {
-                              "u32": 0
+                              "u32": 200
                             }
                           },
                           {
