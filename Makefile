@@ -110,8 +110,6 @@ testnet-stop: ## Stop and remove the local devnet container
 # Git hooks
 setup: bindings-install build test hooks-install ## Full project setup (install + build + test + git hooks)
 	@echo "Setup complete!"
-<<<<<<< HEAD
-=======
 
 hooks-install: ## Install pre-commit git hooks
 	@echo "Installing git hooks..."
@@ -123,7 +121,6 @@ hooks-install: ## Install pre-commit git hooks
 hooks-uninstall: ## Uninstall git hooks
 	@git config --unset core.hooksPath
 	@echo "Git hooks uninstalled. Using default .git/hooks/ directory."
->>>>>>> origin/main
 .PHONY: e2e
 e2e:
 	./e2e/01_setup_and_deploy.sh
