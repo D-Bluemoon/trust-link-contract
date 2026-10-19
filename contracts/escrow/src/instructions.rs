@@ -97,8 +97,8 @@ impl Escrow {
             token,
             amount,
             fee_bps,
-            0_u32,                           // Default resolver fee
-            crate::DEFAULT_SHIPPING_WINDOW,  // Default shipping window fallback
+            0_u32,                          // Default resolver fee
+            crate::DEFAULT_SHIPPING_WINDOW, // Default shipping window fallback
             None,
         )
     }
@@ -1151,7 +1151,11 @@ impl Escrow {
     /// token must pass the allowlist check (if enabled). The primary
     /// `EscrowData` record tracks `tokens[0]`/`amounts[0]`; the full basket
     /// is stored separately and readable via `get_basket_tokens`. Must be
-    /// funded with `fund_basket_escrow`. Emits `basket_escrow_created`.
+    /// funded with `fund_basket_escrow`. The basket is limited to
+    /// `MAX_BASKET_SIZE` entries; duplicate tokens are rejected by a bounded
+    /// pairwise scan. An optional expiry schedule prevents funding at or after
+    /// `expires_at` and permits reclaim after the grace period. Emits
+    /// `basket_escrow_created`.
     pub fn create_basket_escrow(
         env: Env,
         seller: Address,
@@ -1161,12 +1165,46 @@ impl Escrow {
         amounts: soroban_sdk::Vec<i128>,
         fee_bps: u32,
         shipping_window: u64,
+        expires_at: Option<u64>,
+        grace_period: u64,
     ) -> Result<u64, ContractError> {
         seller.require_auth();
         ensure_not_paused(&env)?;
 
-        if tokens.len() != amounts.len() || tokens.is_empty() {
+        if tokens.len() != amounts.len()
+            || tokens.is_empty()
+            || tokens.len() > crate::MAX_BASKET_SIZE
+        {
             return Err(ContractError::BasketTokenMismatch);
+        }
+
+        // The maximum length bounds this pairwise duplicate check to at most
+        // MAX_BASKET_SIZE * (MAX_BASKET_SIZE - 1) / 2 comparisons (190 at 20).
+        for i in 0..tokens.len() {
+            let token_i = tokens.get(i).ok_or(ContractError::IndexOutOfBounds)?;
+            for j in (i + 1)..tokens.len() {
+                let token_j = tokens.get(j).ok_or(ContractError::IndexOutOfBounds)?;
+                if token_i == token_j {
+                    return Err(ContractError::BasketTokenMismatch);
+                }
+            }
+        }
+
+        let global_config = read_global_config(&env);
+        for amount in amounts.iter() {
+            if amount < 0 {
+                return Err(ContractError::InvalidAmount);
+            }
+            if amount > global_config.max_amount {
+                return Err(ContractError::AmountExceedsMaximum);
+            }
+            if amount > 0 && amount < global_config.min_amount {
+                return Err(ContractError::AmountBelowMinimum);
+            }
+        }
+        let primary_amount = amounts.get(0).ok_or(ContractError::InvalidAmount)?;
+        if primary_amount == 0 {
+            return Err(ContractError::AmountBelowMinimum);
         }
 
         validate_escrow_fee_bps(fee_bps)?;
@@ -1184,9 +1222,17 @@ impl Escrow {
             is_token_allowed(&env, &token)?;
         }
 
+        if let Some(expires_at) = expires_at {
+            if expires_at <= env.ledger().timestamp() {
+                return Err(ContractError::InvalidExpiration);
+            }
+            expires_at
+                .checked_add(grace_period)
+                .ok_or(ContractError::ArithmeticOverflow)?;
+        }
+
         let escrow_id = crate::next_escrow_id(&env)?;
 
-        let primary_amount = amounts.get(0).ok_or(ContractError::InvalidAmount)?;
         let primary_token = tokens.get(0).ok_or(ContractError::InvalidAmount)?;
 
         let mut basket_payees = Vec::new(&env);
@@ -1223,6 +1269,17 @@ impl Escrow {
         }
         save_basket_tokens(&env, escrow_id, &basket_entries);
 
+        if let Some(expires_at) = expires_at {
+            let schedule = crate::ExpirySchedule {
+                expires_at,
+                grace_period,
+            };
+            let key = DataKey::PendingExpiry(escrow_id);
+            let ext = get_ttl_extension(&env);
+            env.storage().persistent().set(&key, &schedule);
+            env.storage().persistent().extend_ttl(&key, ext / 2, ext);
+        }
+
         let mut vendor_escrows = storage::read_vendor_escrow_index(&env, &seller);
         vendor_escrows.push_back(escrow_id);
         storage::write_vendor_escrow_index(&env, &seller, &vendor_escrows);
@@ -1246,6 +1303,17 @@ impl Escrow {
 
         if escrow.state != EscrowState::Pending {
             return Err(ContractError::InvalidState);
+        }
+
+        let now = env.ledger().timestamp();
+        crate::internal::ensure_not_expired(&env, escrow_id)?;
+
+        let created_at = crate::internal::escrow_created_at(&env, escrow_id);
+        let blanket_deadline = created_at
+            .checked_add(crate::PENDING_EXPIRY_WINDOW)
+            .ok_or(ContractError::ArithmeticOverflow)?;
+        if now > blanket_deadline {
+            return Err(ContractError::EscrowExpired);
         }
 
         if let Some(ref expected_buyer) = escrow.buyer {
@@ -1272,7 +1340,6 @@ impl Escrow {
             }
         }
 
-        let now = env.ledger().timestamp();
         let prev_state = escrow.state.clone();
         escrow.buyer = Some(buyer.clone());
         escrow.state = EscrowState::Funded;
@@ -1542,7 +1609,6 @@ impl Escrow {
         Ok(escrow_ids)
     }
 
-        pub fn multicall(env: Env, calls: Vec<ContractCall>) -> Result<Vec<Val>, ContractError> {
     /// Executes a batch of contract calls in sequence, returning each call's
     /// result in the same order as `calls`. Supports a fixed allowlist of
     /// entry points (`initialize`, `pause_contract`, `unpause_contract`,
@@ -1619,7 +1685,7 @@ impl Escrow {
         }
         Ok(results)
     }
-
+}
 
 fn parse_arg<T: TryFromVal<Env, Val>>(
     env: &Env,
@@ -1666,7 +1732,14 @@ fn dispatch_raise_dispute(env: &Env, args: &Vec<Val>) -> Result<Val, ContractErr
     let reason: Symbol = parse_arg(env, args, 2)?;
     let description: String = parse_arg(env, args, 3)?;
     let evidence_hash: BytesN<32> = parse_arg(env, args, 4)?;
-    Escrow::raise_dispute(env.clone(), caller, escrow_id, reason, description, evidence_hash)?;
+    Escrow::raise_dispute(
+        env.clone(),
+        caller,
+        escrow_id,
+        reason,
+        description,
+        evidence_hash,
+    )?;
     Ok(().into_val(env))
 }
 
@@ -1764,6 +1837,4 @@ fn dispatch_create_escrow(env: &Env, args: &Vec<Val>) -> Result<Val, ContractErr
         None,
     )?;
     Ok(res.into_val(env))
-}
-
 }

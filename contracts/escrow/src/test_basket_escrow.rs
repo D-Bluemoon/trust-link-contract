@@ -99,6 +99,8 @@ fn create_basket_escrow_persists_all_tokens() {
         &vec_i128(&fx.env, &[1_000, 500, 200]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
     );
 
     // All three tokens/amounts are stored, in order.
@@ -134,6 +136,8 @@ fn create_basket_escrow_rejects_malformed_baskets() {
         &vec_i128(&fx.env, &[1_000]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
     );
     assert_eq!(mismatched, Err(Ok(ContractError::BasketTokenMismatch)));
 
@@ -146,8 +150,148 @@ fn create_basket_escrow_rejects_malformed_baskets() {
         &Vec::<i128>::new(&fx.env),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
     );
     assert_eq!(empty, Err(Ok(ContractError::BasketTokenMismatch)));
+}
+
+#[test]
+fn create_basket_escrow_rejects_duplicate_tokens() {
+    let fx = setup();
+    let client = EscrowClient::new(&fx.env, &fx.contract_id);
+    let token = make_token(&fx.env);
+
+    let result = client.try_create_basket_escrow(
+        &fx.seller,
+        &None::<Address>,
+        &fx.resolver,
+        &vec_addr(&fx.env, &[&token.address, &token.address]),
+        &vec_i128(&fx.env, &[100, 200]),
+        &0_u32,
+        &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
+    );
+
+    assert_eq!(result, Err(Ok(ContractError::BasketTokenMismatch)));
+}
+
+#[test]
+fn create_basket_escrow_rejects_more_than_maximum_basket_size() {
+    let fx = setup();
+    let client = EscrowClient::new(&fx.env, &fx.contract_id);
+    let mut tokens = Vec::new(&fx.env);
+    let mut amounts = Vec::new(&fx.env);
+    for _ in 0..=crate::MAX_BASKET_SIZE {
+        tokens.push_back(Address::generate(&fx.env));
+        amounts.push_back(100_i128);
+    }
+
+    let result = client.try_create_basket_escrow(
+        &fx.seller,
+        &None::<Address>,
+        &fx.resolver,
+        &tokens,
+        &amounts,
+        &0_u32,
+        &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
+    );
+
+    assert_eq!(result, Err(Ok(ContractError::BasketTokenMismatch)));
+}
+
+#[test]
+fn fund_basket_escrow_rejects_funding_at_expiry() {
+    let fx = setup();
+    let client = EscrowClient::new(&fx.env, &fx.contract_id);
+    let primary = make_token(&fx.env);
+    fx.env.ledger().set_timestamp(100);
+    let expires_at = 101;
+
+    let escrow_id = client.create_basket_escrow(
+        &fx.seller,
+        &Some(fx.buyer.clone()),
+        &fx.resolver,
+        &vec_addr(&fx.env, &[&primary.address]),
+        &vec_i128(&fx.env, &[100]),
+        &0_u32,
+        &SHIPPING_WINDOW,
+        &Some(expires_at),
+        &10_u64,
+    );
+
+    let schedule = fx.env.as_contract(&fx.contract_id, || {
+        fx.env
+            .storage()
+            .persistent()
+            .get::<crate::DataKey, crate::ExpirySchedule>(&crate::DataKey::PendingExpiry(escrow_id))
+    });
+    assert_eq!(
+        schedule,
+        Some(crate::ExpirySchedule {
+            expires_at,
+            grace_period: 10,
+        })
+    );
+
+    fx.env.ledger().set_timestamp(expires_at + 1);
+    let result = client.try_fund_basket_escrow(&escrow_id, &fx.buyer);
+    assert_eq!(result, Err(Ok(ContractError::EscrowExpired)));
+    assert_eq!(primary.token.balance(&fx.contract_id), 0);
+}
+
+#[test]
+fn create_basket_escrow_at_maximum_size_stays_within_gas_baseline() {
+    const MAX_CPU_INSNS: u64 = 50_000_000;
+    const MAX_MEM_BYTES: u64 = 5_000_000;
+
+    let fx = setup();
+    let client = EscrowClient::new(&fx.env, &fx.contract_id);
+    let mut tokens = Vec::new(&fx.env);
+    let mut amounts = Vec::new(&fx.env);
+    for _ in 0..crate::MAX_BASKET_SIZE {
+        tokens.push_back(Address::generate(&fx.env));
+        amounts.push_back(100_i128);
+    }
+
+    let before = (
+        fx.env.budget().get_cpu_insns_count(),
+        fx.env.budget().get_mem_bytes_count(),
+    );
+    client.create_basket_escrow(
+        &fx.seller,
+        &None::<Address>,
+        &fx.resolver,
+        &tokens,
+        &amounts,
+        &0_u32,
+        &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
+    );
+    let cpu = fx
+        .env
+        .budget()
+        .get_cpu_insns_count()
+        .saturating_sub(before.0);
+    let memory = fx
+        .env
+        .budget()
+        .get_mem_bytes_count()
+        .saturating_sub(before.1);
+
+    std::println!("max-size basket creation gas: cpu={cpu}, memory={memory}");
+    assert!(
+        cpu <= MAX_CPU_INSNS,
+        "max-size basket CPU usage {cpu} exceeded baseline {MAX_CPU_INSNS}"
+    );
+    assert!(
+        memory <= MAX_MEM_BYTES,
+        "max-size basket memory usage {memory} exceeded baseline {MAX_MEM_BYTES}"
+    );
 }
 
 #[test]
@@ -166,6 +310,8 @@ fn fund_basket_escrow_pulls_every_token_from_buyer() {
         &vec_i128(&fx.env, &[1_000, 500, 200]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
     );
 
     a.admin.mint(&fx.buyer, &1_000);
@@ -211,6 +357,8 @@ fn payout_pays_each_basket_token_to_seller() {
         &vec_i128(&fx.env, &[1_000, 500, 200]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
     );
 
     a.admin.mint(&fx.buyer, &1_000);
@@ -254,6 +402,8 @@ fn zero_amount_token_is_skipped_on_fund_and_payout() {
         &vec_i128(&fx.env, &[1_000, 0, 200]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
     );
 
     a.admin.mint(&fx.buyer, &1_000);
@@ -292,6 +442,8 @@ fn fund_basket_escrow_rejects_a_buyer_other_than_the_expected_buyer() {
         &vec_i128(&fx.env, &[100]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
     );
 
     primary.admin.mint(&stranger, &100);
@@ -317,6 +469,8 @@ fn fund_basket_escrow_is_atomic_when_the_buyer_only_has_part_of_the_basket() {
         &vec_i128(&fx.env, &[100, 50]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
     );
 
     primary.admin.mint(&fx.buyer, &100);
@@ -347,6 +501,8 @@ fn fund_basket_escrow_rejects_a_basket_already_funded_by_fund_escrow() {
         &vec_i128(&fx.env, &[100, 50]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<u64>,
+        &0_u64,
     );
     primary.admin.mint(&fx.buyer, &100);
     additional.admin.mint(&fx.buyer, &50);

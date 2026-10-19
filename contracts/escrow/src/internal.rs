@@ -214,6 +214,27 @@ pub(crate) fn read_fee_config(env: &Env) -> FeeConfig {
         .unwrap_or_else(default_fee_config)
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct GlobalConfig {
+    pub min_amount: i128,
+    pub max_amount: i128,
+}
+
+pub(crate) fn read_global_config(env: &Env) -> GlobalConfig {
+    GlobalConfig {
+        min_amount: env
+            .storage()
+            .instance()
+            .get(&DataKey::MinAmount)
+            .unwrap_or(MIN_ESCROW_AMOUNT),
+        max_amount: env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxAmount)
+            .unwrap_or(MAX_ESCROW_AMOUNT),
+    }
+}
+
 pub(crate) fn write_fee_config(env: &Env, fee_config: &FeeConfig) {
     env.storage()
         .instance()
@@ -715,21 +736,12 @@ pub(crate) fn create_escrow_internal(
         return Err(ContractError::InvalidAmount);
     }
 
-    let max_amount = env
-        .storage()
-        .instance()
-        .get(&DataKey::MaxAmount)
-        .unwrap_or(MAX_ESCROW_AMOUNT);
-    if amount > max_amount {
+    let global_config = read_global_config(env);
+    if amount > global_config.max_amount {
         return Err(ContractError::AmountExceedsMaximum);
     }
 
-    let min_amount = env
-        .storage()
-        .instance()
-        .get(&DataKey::MinAmount)
-        .unwrap_or(MIN_ESCROW_AMOUNT);
-    if amount < min_amount {
+    if amount < global_config.min_amount {
         return Err(ContractError::AmountBelowMinimum);
     }
 
