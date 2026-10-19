@@ -12,7 +12,8 @@
 #![allow(dead_code)]
 
 use soroban_sdk::{
-    testutils::Address as _, token, Address, Env, IntoVal, String as SorobanString, Val, Vec,
+    testutils::Address as _, token, Address, Bytes, BytesN, Env, IntoVal, String as SorobanString,
+    Symbol, Val, Vec,
 };
 use trustlink_escrow::{Escrow, EscrowClient, Payee};
 
@@ -28,13 +29,8 @@ pub const VALID_SHIPPING_WINDOW: u64 = 86_400;
 
 /// Reason symbols accepted by `raise_dispute`. `Symbol::new` panics on
 /// characters outside the Soroban symbol alphabet, so the reason is selected
-/// from this fixed set rather than built from raw fuzz bytes.
-pub const DISPUTE_REASONS: [&str; 4] = [
-    "ITEM_NOT_RECEIVED",
-    "NOT_AS_DESCRIBED",
-    "DAMAGED",
-    "OTHER",
-];
+/// from the contract's fixed set rather than built from raw fuzz bytes.
+pub use trustlink_escrow::DISPUTE_REASONS;
 
 pub struct Harness {
     pub env: Env,
@@ -135,6 +131,58 @@ impl Harness {
             _ => self.outsider.clone(),
         }
     }
+
+    /// A fresh address that holds no role on any escrow.
+    pub fn stranger(&self) -> Address {
+        Address::generate(&self.env)
+    }
+
+    /// `n` generated addresses, for the multi-resolver entry points.
+    pub fn addresses(&self, n: usize) -> Vec<Address> {
+        let mut out = Vec::new(&self.env);
+        for _ in 0..n {
+            out.push_back(Address::generate(&self.env));
+        }
+        out
+    }
+
+    /// Registers a second Stellar Asset Contract, for basket escrows that need
+    /// more than one distinct token.
+    pub fn extra_token(&self) -> Address {
+        let token_admin = Address::generate(&self.env);
+        let token = self
+            .env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        let minter = token::StellarAssetClient::new(&self.env, &token);
+        minter.mint(&self.buyer, &MINT_AMOUNT);
+        minter.mint(&self.seller, &MINT_AMOUNT);
+        token
+    }
+
+    /// Drives a funded escrow into `Disputed`, returning its id.
+    ///
+    /// `None` means an earlier step was rejected, in which case the caller
+    /// should bail out rather than fuzz against the wrong state.
+    pub fn create_disputed_escrow(&self, r: &mut Reader) -> Option<u64> {
+        let id = self.create_funded_escrow()?;
+        let reason = self.dispute_reason(r);
+        let description = r.bytes(&self.env, 64);
+        let evidence_hash = BytesN::from_array(&self.env, &r.bytes32());
+        self.client
+            .try_raise_dispute(&self.buyer, &id, &reason, &description, &evidence_hash)
+            .ok()?
+            .ok()?;
+        Some(id)
+    }
+
+    /// One of the accepted dispute reason symbols, chosen by a fuzz byte.
+    pub fn dispute_reason(&self, r: &mut Reader) -> Symbol {
+        Symbol::new(
+            &self.env,
+            DISPUTE_REASONS[(r.u8() as usize) % DISPUTE_REASONS.len()],
+        )
+    }
 }
 
 impl Default for Harness {
@@ -191,6 +239,9 @@ impl<'d> Reader<'d> {
         buf
     }
 
+    /// A uniformly distributed boolean: the low bit of a fuzzed byte. `u8` is
+    /// drawn uniformly from the input (zero-padded past the end), so `% 2 == 0`
+    /// yields an exact 50/50 split across both branches.
     pub fn bool(&mut self) -> bool {
         self.u8() % 2 == 0
     }
@@ -202,6 +253,24 @@ impl<'d> Reader<'d> {
         self.u64() >> 1
     }
 
+    /// A collection length in `0..=max`, so targets cover the empty case, the
+    /// documented cap and everything in between.
+    pub fn len(&mut self, max: usize) -> usize {
+        (self.u8() as usize) % (max + 1)
+    }
+
+    /// Roughly half the time returns `real_id` (the escrow the target already
+    /// set up); the rest of the time returns an arbitrary fuzzed id. Nearly
+    /// every target uses this to choose between exercising the real escrow
+    /// and probing the not-found / wrong-id path.
+    pub fn target_id(&mut self, real_id: u64) -> u64 {
+        if self.bool() {
+            real_id
+        } else {
+            self.u64()
+        }
+    }
+
     /// An ASCII string of up to `max` characters, exercising the contract's
     /// length validation from empty through over-long.
     pub fn ascii_string(&mut self, env: &Env, max: usize) -> SorobanString {
@@ -211,5 +280,17 @@ impl<'d> Reader<'d> {
             buf.push(char::from(b'a' + (self.u8() % 26)));
         }
         SorobanString::from_str(env, &buf)
+    }
+
+    /// Arbitrary raw bytes up to `max` long, for `Bytes` parameters such as
+    /// dispute descriptions, which skip UTF-8 validation by design. Mirrors
+    /// `ascii_string`'s length distribution (empty through over-long).
+    pub fn bytes(&mut self, env: &Env, max: usize) -> Bytes {
+        let len = (self.u8() as usize) % (max + 1);
+        let mut buf = std::vec::Vec::with_capacity(len);
+        for _ in 0..len {
+            buf.push(self.u8());
+        }
+        Bytes::from_slice(env, &buf)
     }
 }

@@ -1,5 +1,5 @@
-.PHONY: help build build-wasm test fmt clippy bench clean check check-error-codes doc audit indexer-test \
-	testnet testnet-reset testnet-stop fuzz-build fuzz
+.PHONY: help build build-wasm test fmt clippy bench clean check check-error-codes doc audit indexer-test xtask-test \
+	testnet testnet-reset testnet-stop fuzz-build fuzz fuzz-check setup hooks-uninstall
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -25,11 +25,27 @@ fmt: ## Format all code
 fmt-check: ## Check formatting without modifying files
 	cargo fmt --all -- --check
 
-clippy: ## Run clippy lints
-	cargo clippy --lib -- -D warnings
+# Pedantic lints that conflict with Soroban conventions rather than flag bugs:
+# - needless_pass_by_value: #[contractimpl] entry points must take Env/Address by value.
+# - missing_errors_doc: every entry point returns ContractError; codes are documented in errors.rs.
+# - must_use_candidate: fires on every read-only contract query.
+# - wildcard_imports: modules intentionally share the crate prelude via `use crate::*`.
+CLIPPY_PEDANTIC_ALLOW := \
+	-A clippy::needless_pass_by_value \
+	-A clippy::missing_errors_doc \
+	-A clippy::must_use_candidate \
+	-A clippy::wildcard_imports
+
+clippy: ## Run clippy lints, including clippy::pedantic
+	cargo clippy --lib -- -D warnings -W clippy::pedantic $(CLIPPY_PEDANTIC_ALLOW)
+
+check: fmt-check clippy test check-error-codes ## Run all checks (fmt + clippy + test + error-code drift)
 
 bench: ## Run benchmarks (if available)
 	cargo test --release -- --ignored
+
+fuzz-check: ## Type-check every fuzz target on stable (no cargo-fuzz needed)
+	cargo check --manifest-path contracts/escrow/fuzz/Cargo.toml --all-targets
 
 fuzz-build: ## Compile every fuzz target (requires nightly + cargo-fuzz)
 	cd contracts/escrow && cargo fuzz build --release
@@ -45,8 +61,6 @@ clean: ## Clean build artifacts
 
 check-error-codes: ## Verify errors.rs and bindings/src/errors.ts agree
 	node scripts/check-error-codes.mjs
-
-check: fmt-check clippy test check-error-codes ## Run all checks (fmt + clippy + test + error-code drift)
 
 doc: ## Generate and open documentation
 	cargo doc --open
@@ -78,6 +92,10 @@ bindings-install: ## Install bindings dependencies
 indexer-test: ## Typecheck and test the event indexer
 	cd indexer && npm run typecheck && npm test
 
+# Developer CLI (xtask is its own workspace, so root cargo test does not reach it)
+xtask-test: ## Test the cargo xtask developer CLI
+	cd xtask && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
 # Detect Docker Compose v1 vs v2
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 
@@ -98,6 +116,23 @@ testnet-reset: ## Recreate the local devnet from scratch
 testnet-stop: ## Stop and remove the local devnet container
 	./scripts/start-testnet.sh --stop
 
-# Full setup
-setup: bindings-install build test ## Full project setup (install + build + test)
+# Git hooks
+setup: bindings-install build test hooks-install ## Full project setup (install + build + test + git hooks)
 	@echo "Setup complete!"
+
+hooks-install: ## Install pre-commit git hooks
+	@echo "Installing git hooks..."
+	@chmod +x .githooks/pre-commit
+	@git config core.hooksPath .githooks
+	@echo "Git hooks installed successfully."
+	@echo "Pre-commit hook will run cargo fmt and cargo clippy on each commit."
+
+hooks-uninstall: ## Uninstall git hooks
+	@git config --unset core.hooksPath
+	@echo "Git hooks uninstalled. Using default .git/hooks/ directory."
+.PHONY: e2e
+e2e:
+	./e2e/01_setup_and_deploy.sh
+	./e2e/02_happy_path.sh
+	./e2e/03_dispute_path.sh
+	./e2e/04_cancel_path.sh

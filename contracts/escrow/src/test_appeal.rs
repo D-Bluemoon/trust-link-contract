@@ -81,8 +81,8 @@ fn setup_funded_escrow() -> Setup {
 /// resolves immediately), leaving the escrow in `PendingFinalization`.
 fn raise_and_resolve(setup: &Setup) {
     let client = EscrowClient::new(&setup.env, &setup.contract_id);
-    let reason = Symbol::new(&setup.env, "non_delivery");
-    let description = String::from_str(&setup.env, "Item never arrived");
+    let reason = Symbol::new(&setup.env, "ITEM_NOT_RECEIVED");
+    let description = soroban_sdk::Bytes::from_slice(&setup.env, b"Item never arrived");
     let evidence = BytesN::from_array(&setup.env, &[0xab; 32]);
     client.raise_dispute(
         &setup.buyer,
@@ -254,7 +254,9 @@ fn appeal_succeeds_by_seller_and_reopens_dispute() {
         client.get_escrow(&setup.escrow_id).state,
         EscrowState::Disputed,
     );
-    let dispute = client.get_dispute(&setup.escrow_id).expect("dispute exists");
+    let dispute = client
+        .get_dispute(&setup.escrow_id)
+        .expect("dispute exists");
     assert_eq!(dispute.appeal_count, 1);
     assert_eq!(dispute.status, DisputeStatus::Active);
     assert_eq!(dispute.resolution, 0);

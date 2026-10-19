@@ -97,6 +97,21 @@ This repository participates in the **[Stellar Wave Program](https://www.drips.n
 
 ## Development Setup
 
+Run the following after cloning to install git hooks:
+
+```bash
+make setup
+```
+
+This installs a pre-commit hook that automatically checks:
+
+- **Formatting**: `cargo fmt --all -- --check`
+- **Lints**: `cargo clippy --all-targets --all-features -- -D warnings`
+
+Commits will be rejected if either check fails.
+
+Run `cargo fmt --all` to fix formatting issues.
+
 ### Option A — Dev Container (recommended, zero manual setup)
 
 The repo ships a [`.devcontainer/`](.devcontainer/) definition, so you can get a fully provisioned environment without installing Rust, Node, PostgreSQL or the Stellar CLI on your machine.
@@ -243,7 +258,7 @@ Branch naming conventions:
 
 **General Rust**
 - Run `cargo fmt --all` before every commit — CI rejects unformatted code.
-- Run `cargo clippy --lib -- -D warnings` — fix all warnings, never suppress them without a comment.
+- Run `make clippy` (`clippy::pedantic` with `-D warnings`) — fix all warnings, never suppress them without a comment.
 - Prefer explicit error returns over `unwrap()` — use `ContractError` variants from `errors.rs`.
 - Comment non-obvious logic. If you had to think about it for more than 30 seconds, leave a comment.
 
@@ -458,6 +473,50 @@ New features must include tests for:
 2. At least one unauthorized access attempt (wrong caller)
 3. Invalid state transitions (calling a function out of sequence)
 4. Edge case inputs (zero amounts, expired windows, etc.)
+
+### Snapshot Files
+
+The `soroban-sdk` test `Env` writes a **ledger/event snapshot** for every test
+that runs, to `contracts/escrow/test_snapshots/<test_module>/<test_name>.1.json`.
+These are committed golden files: the CI pipeline and maintainers use them to
+detect unintended drift in emitted events, auth invocations, and on-chain
+storage between the contract code and its tests.
+
+**How snapshots are generated.** Snapshots are produced automatically on every
+successful test run — there is no separate tool. Each test that uses
+`Env::default()` prints and writes its snapshot:
+
+```text
+Writing test snapshot file for test "test_ttl::test_set_ttl_extension_persists" to "test_snapshots/test_ttl/test_set_ttl_extension_persists.1.json".
+```
+
+**Regenerating snapshots.** Because snapshots are written on every run for
+unchanged code, they are deterministic (a regenerated snapshot for unchanged
+code produces no `git diff`). To update snapshots after changing contract
+behaviour, events, or storage keys:
+
+```bash
+cargo test --lib -p trustlink-escrow
+git status                       # review the snapshot diffs
+git diff contracts/escrow/test_snapshots/   # confirm only intended changes
+git add contracts/escrow/test_snapshots/
+```
+
+If a snapshot is stale, missing, or you suspect drift, just delete the file and
+re-run the test — the harness recreates it from the current contract code.
+
+**When CI drift detection fails.** If a PR changes the contract (events, event
+signatures, auth, storage) without regenerating the matching snapshots, the
+snapshots no longer reflect the code and the PR's snapshot diff reveals the
+drift. Always regenerate snapshots in the same PR that changes behaviour, and
+review the diff — an unexpected snapshot change often means an accidental
+behaviour change. CI treats the committed snapshots as the source of truth:
+stale or omitted snapshots are caught when the regenerated output differs from
+what is committed.
+
+**No Git LFS required.** Snapshots are plain, human-readable JSON text files
+(a few tens of kilobytes). Commit them with normal `git add`; do **not** route
+them through Git LFS.
 
 ---
 

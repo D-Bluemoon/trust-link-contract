@@ -72,6 +72,11 @@ CREATE TABLE IF NOT EXISTS disputes (
 --
 -- BasketEscrowCreated carries only the escrow id, seller and token count, so
 -- basket escrows get their own table rather than a partial `escrows` row.
+--
+-- `token_count` mirrors `get_basket_tokens(id)`: a row here means a real basket
+-- (`Some([...])`, `token_count >= 1`). A missing escrow is `None` and a
+-- single-token escrow is `Some([])` — neither gets a row. See indexer/README.md
+-- ("Basket escrows") and docs/INTEGRATION_GUIDE.md ("Reading basket tokens").
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS basket_escrows (
   escrow_id      BIGINT PRIMARY KEY,
@@ -168,3 +173,9 @@ CREATE TABLE IF NOT EXISTS indexer_cursor (
 INSERT INTO indexer_cursor (id, ledger_sequence, tx_index, event_index)
 VALUES (1, 0, 0, 0)
 ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE basket_tokens (
+    escrow_id VARCHAR(56) NOT NULL,
+    token VARCHAR(56) NOT NULL,
+    amount NUMERIC NOT NULL
+);

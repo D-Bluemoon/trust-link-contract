@@ -85,10 +85,15 @@ TrustLink is a three-party escrow contract with seller, buyer, and resolver role
 
 **Mitigation**:
 - ✅ Dispute window: 172800s (2 days) from funding
+- ✅ `raise_dispute` checks `now < dispute_deadline` (enforced at `instructions.rs:raise_dispute`)
 - ✅ Shipped state from `mark_shipped` call
 - ✅ `auto_release` checks `funded_at + shipping_window <= now`
 - ✅ Dispute raises new dispute window, separate from shipping window
 - ✅ Can auto-release even with expired dispute window if no active dispute
+
+**Error Code References**: See [ERROR_CODES.md](ERROR_CODES.md):
+- Code 13 (`DeliveryBeforeDisputeWindow`) — `auto_release` called before `dispute_deadline` passes
+- Code 24 (`DisputeWindowStillOpen`) — `confirm_delivery` called before `dispute_deadline`, or `raise_dispute` called after `dispute_deadline`
 
 **Residual Risk**: Low. Separate windows; shipping window is hardcoded.
 
@@ -197,19 +202,24 @@ TrustLink is a three-party escrow contract with seller, buyer, and resolver role
 
 ### THREAT 10: Invalid Evidence Hash
 
-**Scenario**: Attacker provides invalid (non-32-byte) evidence hash, causing validation to fail.
+**Scenario**: Attacker provides a malformed evidence hash, leaving the dispute record inconsistent or the commitment meaningless.
 
 **Attack Vector**:
-- Call `raise_dispute` with 31-byte evidence_hash
-- Validation fails but state is partially changed
-- Contract in inconsistent state
+- Call `raise_dispute` with a 31-byte evidence_hash
+- Validation fails part-way, after state has already changed
+- Contract left in an inconsistent state
 
 **Mitigation**:
-- ✅ Evidence hash validated to be exactly 32 bytes before ANY state change
-- ✅ Validation error returns `InvalidEvidenceHash` immediately
-- ✅ No state written if validation fails (atomic check)
+- ✅ `evidence_hash` is typed `BytesN<32>`, so the host rejects any other length while decoding the arguments — `raise_dispute` never begins executing, and no state can be written
+- ✅ Length is therefore enforced by the ABI rather than by a runtime check; `ContractError::InvalidEvidenceHash` exists but is not returned today
 
-**Residual Risk**: Very Low. Validation is precondition.
+**Residual Risk**: Low. The length is guaranteed, but the *content* is not: the
+contract cannot tell a real SHA-256 digest from arbitrary bytes, and the
+all-zero digest is accepted as the conventional "no evidence attached" marker.
+A dispute's evidence hash is a commitment the buyer makes, not a claim the
+contract verifies — off-chain consumers must re-hash the evidence and compare
+(`verifyEvidence()` in `@trustlink/contract-bindings`) before treating it as
+proof.
 
 ---
 

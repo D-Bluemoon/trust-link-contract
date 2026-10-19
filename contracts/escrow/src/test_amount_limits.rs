@@ -4,6 +4,7 @@ use crate::{ContractError, EscrowClient, Payee};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, IntoVal, Vec};
 
+#[allow(dead_code)]
 fn single_payee(env: &Env, address: &Address) -> Vec<Payee> {
     let mut payees = Vec::new(env);
     payees.push_back(Payee {
@@ -24,7 +25,9 @@ fn setup_env() -> (Env, Address, Address, Address, Address, Address, Address) {
     let token_admin = Address::generate(&env);
     let fee_collector = Address::generate(&env);
 
-    let token_address = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+    let token_address = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
 
     (
         env,
@@ -65,7 +68,10 @@ fn test_amount_limits_enforced() {
 
     // Test exactly minimum
     let mut payees_2 = Vec::new(&env);
-    payees_2.push_back(Payee { address: seller.clone(), bps: 10_000 });
+    payees_2.push_back(Payee {
+        address: seller.clone(),
+        bps: 10_000,
+    });
     let payees_2_val = payees_2.into_val(&env);
     let id1 = client.create_escrow_8(
         &payees_2_val,
@@ -80,7 +86,10 @@ fn test_amount_limits_enforced() {
 
     // Test exactly maximum
     let mut payees_1 = Vec::new(&env);
-    payees_1.push_back(Payee { address: seller.clone(), bps: 10_000 });
+    payees_1.push_back(Payee {
+        address: seller.clone(),
+        bps: 10_000,
+    });
     let payees_1_val = payees_1.into_val(&env);
     let id2 = client.create_escrow_8(
         &payees_1_val,
