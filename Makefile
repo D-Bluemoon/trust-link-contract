@@ -1,4 +1,4 @@
-.PHONY: help build build-wasm test fmt clippy bench clean check check-error-codes doc audit indexer-test xtask-test \
+.PHONY: help build build-wasm test test-all fmt clippy bench clean check check-error-codes docs-link-check doc audit indexer-test xtask-test \
 	testnet testnet-reset testnet-stop fuzz-build fuzz fuzz-check setup hooks-uninstall
 
 help: ## Show this help
@@ -13,10 +13,13 @@ build-debug: ## Build all contracts in debug mode
 build-wasm: ## Build contract wasm for deployment
 	cargo build --target wasm32v1-none --release
 
-test: ## Run all tests (lib target, cross-platform)
+test: ## Run unit tests only (lib target, cross-platform)
 	cargo test --lib
 
-test-verbose: ## Run all tests with output
+test-all: ## Run every test target: unit tests plus contracts/escrow/tests/ integration suites
+	cargo test --tests --features trustlink-escrow/testutils
+
+test-verbose: ## Run unit tests with output
 	cargo test --lib -- --nocapture
 
 fmt: ## Format all code
@@ -36,10 +39,26 @@ CLIPPY_PEDANTIC_ALLOW := \
 	-A clippy::must_use_candidate \
 	-A clippy::wildcard_imports
 
-clippy: ## Run clippy lints, including clippy::pedantic
-	cargo clippy --lib -- -D warnings -W clippy::pedantic $(CLIPPY_PEDANTIC_ALLOW)
+# Panic-free contract code policy (CONTRIBUTING.md "Panic-Free Contract Code
+# Policy"): production code must never panic. `--lib` doesn't compile
+# `#[cfg(test)]` or `#[cfg(any(test, feature = "testutils"))]` items, so these
+# restriction lints only ever see non-test code and can be enabled
+# unconditionally here. `clippy::unwrap_used` (not `unwrap_in_result`, which
+# only fires on Result-unwraps inside a Result-returning fn and misses plain
+# Option::unwrap() entirely) catches every unwrap() on both Option and
+# Result regardless of the enclosing function's return type.
+CLIPPY_PANIC_FREE := \
+	-W clippy::unwrap_used \
+	-W clippy::expect_used \
+	-W clippy::panic
 
-check: fmt-check clippy test check-error-codes ## Run all checks (fmt + clippy + test + error-code drift)
+# Canonical lint scope (issue #1102): this is the ONLY clippy command that
+# gates this repository. Both .githooks/pre-commit and .github/workflows/ci.yml
+# run it via `make clippy`, so a commit that passes locally passes in CI.
+clippy: ## Run clippy lints, including clippy::pedantic + the panic-free restriction lints (canonical scope, used by hook and CI)
+	cargo clippy --lib -- -D warnings -W clippy::pedantic $(CLIPPY_PEDANTIC_ALLOW) $(CLIPPY_PANIC_FREE)
+
+check: fmt-check clippy test check-error-codes docs-link-check ## Run all checks (fmt + clippy + test + error-code drift + required docs links)
 
 bench: ## Run benchmarks (if available)
 	cargo test --release -- --ignored
@@ -61,6 +80,9 @@ clean: ## Clean build artifacts
 
 check-error-codes: ## Verify errors.rs and bindings/src/errors.ts agree
 	node scripts/check-error-codes.mjs
+
+docs-link-check: ## Verify required resolver documentation links
+	node scripts/check-resolver-links.mjs
 
 doc: ## Generate and open documentation
 	cargo doc --open
@@ -125,13 +147,16 @@ hooks-install: ## Install pre-commit git hooks
 	@chmod +x .githooks/pre-commit
 	@git config core.hooksPath .githooks
 	@echo "Git hooks installed successfully."
-	@echo "Pre-commit hook will run cargo fmt and cargo clippy on each commit."
+	@echo "Pre-commit hook will run 'make fmt-check' and 'make clippy' on each commit."
 
 hooks-uninstall: ## Uninstall git hooks
 	@git config --unset core.hooksPath
 	@echo "Git hooks uninstalled. Using default .git/hooks/ directory."
+# End-to-End integration tests across a running Stellar network (devnet or testnet).
+# Excluded from CI due to external network and container dependencies; see CONTRIBUTING.md and .github/workflows/ci.yml.
+# Prerequisites: stellar CLI, jq, and a running network (`make testnet` or testnet).
 .PHONY: e2e
-e2e:
+e2e: ## Run end-to-end integration scripts against localnet or testnet
 	./e2e/01_setup_and_deploy.sh
 	./e2e/02_happy_path.sh
 	./e2e/03_dispute_path.sh

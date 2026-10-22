@@ -1,5 +1,8 @@
 # Multi-Resolver & Fallback Dispute Resolution Schemes
 
+For concise resolver guidance and operational deadlock risks, see
+[docs/resolvers.md](docs/resolvers.md).
+
 ## Overview
 
 The TrustLink Escrow Contract supports three flexible dispute resolution architectures:
@@ -283,7 +286,7 @@ pub struct EscrowData {
 // TypeScript binding (pseudo-code)
 // Single resolver (backward compatible)
 await contract.create_escrow({
-    seller, buyer, resolver, token, amount, fee_bps, shipping_window
+    seller, buyer, resolver, token, amount, fee_bps, resolver_fee_bps, shipping_window, notes
 });
 
 // Multi-resolver (M-of-N voting)

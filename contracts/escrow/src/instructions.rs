@@ -173,16 +173,7 @@ impl Escrow {
         )?;
 
         if let Some(exp_data) = expires_at {
-            let schedule = crate::ExpirySchedule {
-                expires_at: exp_data,
-                grace_period,
-            };
-            let key = DataKey::PendingExpiry(escrow_id);
-            let ext = get_ttl_extension(&env);
-            env.storage().persistent().set(&key, &schedule);
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, ext / TTL_THRESHOLD_DIVISOR, ext);
+            save_pending_expiry(&env, escrow_id, exp_data, grace_period);
         }
 
         Ok(escrow_id)
@@ -270,9 +261,7 @@ impl Escrow {
         }
 
         let created_at = escrow_created_at(&env, escrow_id);
-        let deadline = created_at
-            .checked_add(PENDING_EXPIRY_WINDOW)
-            .ok_or(ContractError::ArithmeticOverflow)?;
+        let deadline = pending_expiry_deadline(created_at)?;
         if env.ledger().timestamp() <= deadline {
             return Err(ContractError::ShippingWindowNotElapsed);
         }
@@ -314,23 +303,7 @@ impl Escrow {
         now.checked_add(DISPUTE_WINDOW)
             .ok_or(ContractError::ArithmeticOverflow)?;
 
-        if let Some(schedule) = env
-            .storage()
-            .persistent()
-            .get::<DataKey, crate::ExpirySchedule>(&DataKey::PendingExpiry(escrow_id))
-        {
-            if now >= schedule.expires_at {
-                return Err(ContractError::EscrowExpired);
-            }
-        }
-
-        let created_at = crate::internal::escrow_created_at(&env, escrow_id);
-        let blanket_deadline = created_at
-            .checked_add(crate::PENDING_EXPIRY_WINDOW)
-            .ok_or(ContractError::ArithmeticOverflow)?;
-        if now > blanket_deadline {
-            return Err(ContractError::EscrowExpired);
-        }
+        crate::internal::ensure_funding_not_expired(&env, escrow_id)?;
 
         // Security: buyer must differ from seller and resolver.
         for i in 0..escrow.payees.inner.len() {
@@ -1358,8 +1331,24 @@ impl Escrow {
     /// validated: must be > 0 and within `[MinAmount, MaxAmount]`. The primary
     /// `Escrow` record tracks `tokens[0]`/`amounts[0]`; the full basket
     /// is stored separately and readable via `get_basket_tokens`. `notes` is
-    /// capped at `MAX_NOTES_LEN`, same as `create_escrow`. Must be funded with
-    /// `fund_basket_escrow`. Emits `basket_escrow_created`.
+    /// capped at `MAX_NOTES_LEN`, same as `create_escrow`. When `expires_at` is
+    /// present, the expiration is stored on the escrow and as a
+    /// `PendingExpiry` schedule, and `fund_basket_escrow` rejects funding
+    /// attempts past it with `EscrowExpired` (via the same
+    /// `internal::ensure_not_expired`/`ensure_funding_not_expired` checks
+    /// `fund_escrow` uses). Must be funded with `fund_basket_escrow`.
+    /// Emits `basket_escrow_created`.
+    ///
+    /// Unlike `create_escrow_with_expiration`, there is no `grace_period`
+    /// parameter here: basket escrows always get `grace_period = 0`, i.e. no
+    /// buffer past `expires_at` before `reclaim_expired` can act. This isn't
+    /// a deliberate basket-specific restriction — `grace_period` exists to
+    /// protect a fund/ship transaction that's still landing right at the
+    /// deadline, which applies just as much to baskets — it's simply not
+    /// wired up yet. A caller that needs a grace window for a basket escrow
+    /// has no way to get one today; adding a `grace_period: u64` parameter
+    /// here, mirroring `create_escrow_with_expiration`, is the known fix.
+    #[allow(clippy::too_many_lines)]
     pub fn create_basket_escrow(
         env: Env,
         seller: Address,
@@ -1372,6 +1361,7 @@ impl Escrow {
         expires_at: Option<u64>,
         grace_period: u64,
         notes: Option<String>,
+        expires_at: Option<u64>,
     ) -> Result<u64, ContractError> {
         auth!(seller);
         ensure_action_not_paused(&env, Symbol::new(&env, "create_basket_escrow"))?;
@@ -1418,6 +1408,12 @@ impl Escrow {
         let notes = notes.unwrap_or_else(|| String::from_str(&env, ""));
         if notes.len() > MAX_NOTES_LEN {
             return Err(ContractError::InputTooLong);
+        }
+
+        if let Some(expiry) = expires_at {
+            if expiry <= env.ledger().timestamp() {
+                return Err(ContractError::InvalidExpiration);
+            }
         }
 
         // Validate every basket amount against the configured or default limits.
@@ -1504,11 +1500,18 @@ impl Escrow {
             delivered_at: None,
             tracking_id: None,
             notes,
-            expires_at: None,
+            expires_at,
+            // No `grace_period` parameter on this function yet — see the
+            // doc comment above `create_basket_escrow` for why this is a
+            // known gap rather than an intentional basket-specific choice.
             grace_period: 0,
         };
 
         save_escrow(&env, escrow_id, &escrow, None);
+
+        if let Some(expiry) = expires_at {
+            save_pending_expiry(&env, escrow_id, expiry, 0);
+        }
 
         // Persist all basket tokens/amounts alongside the primary Escrow
         let mut basket_entries: Vec<TokenEntry> = Vec::new(&env);
@@ -1601,27 +1604,8 @@ impl Escrow {
             ));
         }
 
-        // Expiry checks, mirroring fund_escrow: an explicit PendingExpiry
-        // schedule and the blanket 7-day PENDING_EXPIRY_WINDOW after creation.
-        // A basket escrow cannot be funded once it has expired, just like a
-        // normal escrow.
+        crate::internal::ensure_funding_not_expired(&env, escrow_id)?;
         let now = env.ledger().timestamp();
-        if let Some(schedule) = env
-            .storage()
-            .persistent()
-            .get::<DataKey, crate::ExpirySchedule>(&DataKey::PendingExpiry(escrow_id))
-        {
-            if now >= schedule.expires_at {
-                return Err(ContractError::EscrowExpired);
-            }
-        }
-        let created_at = crate::internal::escrow_created_at(&env, escrow_id);
-        let blanket_deadline = created_at
-            .checked_add(crate::PENDING_EXPIRY_WINDOW)
-            .ok_or(ContractError::ArithmeticOverflow)?;
-        if now > blanket_deadline {
-            return Err(ContractError::EscrowExpired);
-        }
 
         // Security: buyer must differ from every payee (seller) and every
         // resolver in the set. Mirrors the identical check in fund_escrow and
@@ -1650,6 +1634,11 @@ impl Escrow {
         if now > blanket_deadline {
             return Err(ContractError::EscrowExpired);
         }
+        // Expiry: PendingExpiry schedule + blanket PENDING_EXPIRY_WINDOW,
+        // shared with fund_escrow via the internal::ensure_funding_not_expired
+        // helper (Issue #1156). Without this, basket escrows could be funded
+        // after the pending window expired.
+        crate::internal::ensure_funding_not_expired(&env, escrow_id)?;
 
         if let Some(ref expected_buyer) = escrow.buyer {
             if &buyer != expected_buyer {

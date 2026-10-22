@@ -1,5 +1,15 @@
 # TrustLink Contract — Audit Scope
 
+> [!IMPORTANT]
+> **Canonical Audit Scope**: This document (`AUDIT_SCOPE.md`) is the single canonical source of truth for the audit scope and fee parameter limits of the TrustLink contract. No duplicate audit scope document exists (e.g. `audit/SCOPE.md` must not be created).
+> The fee caps below link to their canonical definitions in `contracts/escrow/src/lib.rs` and to their public errors in [`ERROR_CODES.md`](ERROR_CODES.md):
+> - [`MAX_ESCROW_FEE_BPS = 300`](contracts/escrow/src/lib.rs#L66) (3%) — enforced via [`FeeExceedsMax` (7)](ERROR_CODES.md#7)
+> - [`MAX_ARBITRATION_FEE_BPS = 500`](contracts/escrow/src/lib.rs#L72) (5%) — enforced via [`FeeExceedsMax` (7)](ERROR_CODES.md#7)
+> - [`MAX_COMBINED_FEE_BPS = 1000`](contracts/escrow/src/lib.rs#L89) (10%) — enforced via [`FeeExceedsMax` (7)](ERROR_CODES.md#7)
+> - [`MAX_PLATFORM_FEE_BPS = 200`](contracts/escrow/src/lib.rs#L105) (2%) — enforced via [`PlatformFeeExceedsMax` (32)](ERROR_CODES.md#32)
+>
+> Any changes to contract fee constants in `contracts/escrow/src/lib.rs` must be updated here and in [ERROR_CODES.md](ERROR_CODES.md).
+
 ## Contract Overview
 
 **Project**: TrustLink Escrow Contract
@@ -48,7 +58,7 @@
 
 ## Entry Points
 
-1. **create_escrow(seller, payees, resolver, token, amount, fee_bps, shipping_window)** → u64
+1. **create_escrow(seller_or_payees, buyer, resolver, token, amount, fee_bps, resolver_fee_bps, shipping_window, notes)** → u64
 2. **fund_escrow(escrow_id, buyer)** → Result
 3. **confirm_delivery(escrow_id)** → Result
 4. **raise_dispute(escrow_id, category, reason, evidence_hash)** → Result
@@ -162,7 +172,7 @@ Funded ──request_refund──> RefundRequested ──approve/deny──> Com
 
 ## Fee Model
 
-The contract enforces strict fee caps to prevent abuse. All fee constants are defined in `contracts/escrow/src/lib.rs` (lines 60-92).
+The contract enforces strict fee caps to prevent abuse. The canonical definitions are linked in the header above.
 
 ### Fee Constants (Source of Truth: lib.rs)
 
