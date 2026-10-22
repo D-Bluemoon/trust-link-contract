@@ -147,17 +147,27 @@ export const contractAbi = {
       ],
       output: "u64",
     },
-    {
+       {
       name: "create_basket_escrow",
-      inputs: ["seller", "buyer", "resolver", "tokens", "amounts", "fee_bps", "shipping_window", "expires_at", "grace_period"],
-     
-
+      inputs: [
+        "seller",
+        "buyer",
+        "resolver",
+        "tokens",
+        "amounts",
+        "fee_bps",
+        "shipping_window",
+        "notes",
+        "expires_at",
+        "grace_period"
+      ],
       output: "u64",
     },
     { name: "batch_create_escrow", inputs: ["seller", "escrows"], output: "Vec<u64>" },
 
     // -----------------------------------------------------------------------
     // Escrow lifecycle
+
     // -----------------------------------------------------------------------
     { name: "fund_escrow", inputs: ["escrow_id", "buyer"], output: "void" },
     { name: "fund_basket_escrow", inputs: ["escrow_id", "buyer"], output: "void" },
