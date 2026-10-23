@@ -159,7 +159,7 @@ export const contractAbi = {
         "shipping_window",
         "notes",
         "expires_at",
-        "grace_period"
+        "grace_period",
       ],
       output: "u64",
     },

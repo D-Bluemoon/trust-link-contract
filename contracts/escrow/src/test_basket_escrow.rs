@@ -104,10 +104,9 @@ fn create_basket_escrow_persists_all_tokens() {
         &vec_i128(&fx.env, &[1_000, 500, 200]),
         &0_u32,
         &SHIPPING_WINDOW,
-        &None::<u64>,
-        &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     // All three tokens/amounts are stored, in order.
@@ -143,10 +142,9 @@ fn create_basket_escrow_rejects_malformed_baskets() {
         &vec_i128(&fx.env, &[1_000]),
         &0_u32,
         &SHIPPING_WINDOW,
-        &None::<u64>,
-        &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(mismatched, Err(Ok(ContractError::BasketTokenMismatch)));
 
@@ -159,10 +157,9 @@ fn create_basket_escrow_rejects_malformed_baskets() {
         &Vec::<i128>::new(&fx.env),
         &0_u32,
         &SHIPPING_WINDOW,
-        &None::<u64>,
-        &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(empty, Err(Ok(ContractError::BasketTokenMismatch)));
 }
@@ -181,6 +178,7 @@ fn create_basket_escrow_rejects_duplicate_tokens() {
         &vec_i128(&fx.env, &[100, 200]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<soroban_sdk::String>,
         &None::<u64>,
         &0_u64,
     );
@@ -207,6 +205,7 @@ fn create_basket_escrow_rejects_more_than_maximum_basket_size() {
         &amounts,
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<soroban_sdk::String>,
         &None::<u64>,
         &0_u64,
     );
@@ -230,6 +229,7 @@ fn fund_basket_escrow_rejects_funding_at_expiry() {
         &vec_i128(&fx.env, &[100]),
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<soroban_sdk::String>,
         &Some(expires_at),
         &10_u64,
     );
@@ -269,8 +269,8 @@ fn create_basket_escrow_at_maximum_size_stays_within_gas_baseline() {
     }
 
     let before = (
-        fx.env.budget().get_cpu_insns_count(),
-        fx.env.budget().get_mem_bytes_count(),
+        fx.env.cost_estimate().budget().cpu_instruction_cost(),
+        fx.env.cost_estimate().budget().memory_bytes_cost(),
     );
     client.create_basket_escrow(
         &fx.seller,
@@ -280,18 +280,21 @@ fn create_basket_escrow_at_maximum_size_stays_within_gas_baseline() {
         &amounts,
         &0_u32,
         &SHIPPING_WINDOW,
+        &None::<soroban_sdk::String>,
         &None::<u64>,
         &0_u64,
     );
     let cpu = fx
         .env
+        .cost_estimate()
         .budget()
-        .get_cpu_insns_count()
+        .cpu_instruction_cost()
         .saturating_sub(before.0);
     let memory = fx
         .env
+        .cost_estimate()
         .budget()
-        .get_mem_bytes_count()
+        .memory_bytes_cost()
         .saturating_sub(before.1);
 
     std::println!("max-size basket creation gas: cpu={cpu}, memory={memory}");
@@ -321,10 +324,9 @@ fn fund_basket_escrow_pulls_every_token_from_buyer() {
         &vec_i128(&fx.env, &[1_000, 500, 200]),
         &0_u32,
         &SHIPPING_WINDOW,
-        &None::<u64>,
-        &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     a.admin.mint(&fx.buyer, &1_000);
@@ -395,6 +397,7 @@ fn get_basket_tokens_distinguishes_missing_vs_single_token() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     let basket = client.get_basket_tokens(&basket_id);
     assert!(basket.is_some());
@@ -421,6 +424,7 @@ fn fund_basket_escrow_rejects_empty_basket_with_basket_token_mismatch() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     // Simulate a corrupt/empty basket: clear the stored token entries directly.
@@ -452,10 +456,9 @@ fn payout_pays_each_basket_token_to_seller() {
         &vec_i128(&fx.env, &[1_000, 500, 200]),
         &0_u32,
         &SHIPPING_WINDOW,
-        &None::<u64>,
-        &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     a.admin.mint(&fx.buyer, &1_000);
@@ -499,10 +502,9 @@ fn create_basket_escrow_rejects_zero_secondary_amount() {
         &vec_i128(&fx.env, &[1_000, 0, 200]),
         &0_u32,
         &SHIPPING_WINDOW,
-        &None::<u64>,
-        &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(result, Err(Ok(ContractError::InvalidAmount)));
 }
@@ -522,10 +524,9 @@ fn fund_basket_escrow_rejects_a_buyer_other_than_the_expected_buyer() {
         &vec_i128(&fx.env, &[100]),
         &0_u32,
         &SHIPPING_WINDOW,
-        &None::<u64>,
-        &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     primary.admin.mint(&stranger, &100);
@@ -551,10 +552,9 @@ fn fund_basket_escrow_is_atomic_when_the_buyer_only_has_part_of_the_basket() {
         &vec_i128(&fx.env, &[100, 50]),
         &0_u32,
         &SHIPPING_WINDOW,
-        &None::<u64>,
-        &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     primary.admin.mint(&fx.buyer, &100);
@@ -585,10 +585,9 @@ fn fund_basket_escrow_rejects_a_basket_already_funded_by_fund_escrow() {
         &vec_i128(&fx.env, &[100, 50]),
         &0_u32,
         &SHIPPING_WINDOW,
-        &None::<u64>,
-        &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     primary.admin.mint(&fx.buyer, &100);
     additional.admin.mint(&fx.buyer, &50);
@@ -618,6 +617,7 @@ fn fund_basket_escrow_transfers_only_the_configured_amounts() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     primary.admin.mint(&fx.buyer, &150);
     additional.admin.mint(&fx.buyer, &75);
@@ -646,6 +646,7 @@ fn cancel_escrow_refunds_basket_tokens_to_the_buyer() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     a.admin.mint(&fx.buyer, &1_000);
@@ -678,6 +679,7 @@ fn mutual_cancel_refunds_basket_tokens_to_the_buyer() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     a.admin.mint(&fx.buyer, &1_000);
@@ -709,6 +711,7 @@ fn co_signed_release_pays_out_basket_tokens_to_the_seller() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     a.admin.mint(&fx.buyer, &1_000);
@@ -755,6 +758,7 @@ fn create_basket_escrow_rejects_secondary_amount_below_minimum() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(result, Err(Ok(ContractError::AmountBelowMinimum)));
 }
@@ -786,6 +790,7 @@ fn create_basket_escrow_rejects_secondary_amount_above_maximum() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(result, Err(Ok(ContractError::AmountExceedsMaximum)));
 }
@@ -810,6 +815,7 @@ fn create_basket_escrow_with_all_valid_amounts_succeeds() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     let entries = client.get_basket_tokens(&escrow_id).unwrap();
@@ -840,6 +846,7 @@ fn fund_basket_escrow_rejects_buyer_equal_to_seller() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     primary.admin.mint(&fx.seller, &1_000);
@@ -873,6 +880,7 @@ fn fund_basket_escrow_rejects_buyer_equal_to_resolver() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     primary.admin.mint(&fx.resolver, &1_000);
@@ -919,6 +927,7 @@ fn fund_basket_escrow_after_blanket_expiry_returns_escrow_expired() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     primary.admin.mint(&buyer, &1_000);
@@ -964,6 +973,7 @@ fn create_basket_escrow_accepts_basket_at_max_size() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     assert_eq!(
@@ -1002,6 +1012,7 @@ fn create_basket_escrow_persists_expiry_and_blocks_late_funding() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &Some(expires_at),
+        &0_u64,
     );
 
     let stored_schedule = env.as_contract(&contract_id, || {
@@ -1061,6 +1072,7 @@ fn create_basket_escrow_rejects_basket_over_max_size() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(result, Err(Ok(ContractError::BasketTokenMismatch)));
 }
@@ -1085,6 +1097,7 @@ fn create_basket_escrow_rejects_duplicate_secondary_token() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(result, Err(Ok(ContractError::BasketTokenMismatch)));
 }
@@ -1111,6 +1124,7 @@ fn create_basket_escrow_rejects_duplicate_primary_token() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(result, Err(Ok(ContractError::BasketTokenMismatch)));
 }
@@ -1148,6 +1162,7 @@ fn fund_basket_escrow_with_maximum_allowed_tokens() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     // Verify all 20 tokens are stored.
@@ -1197,6 +1212,7 @@ fn fund_and_payout_skip_primary_token_by_value_in_agreement() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
 
     // Simulate a persisted basket whose order no longer puts the primary at
@@ -1276,6 +1292,7 @@ fn create_basket_escrow_validates_shipping_window() {
         &0_u64,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(zero, Err(Ok(ContractError::InvalidShippingWindow)));
 
@@ -1290,6 +1307,7 @@ fn create_basket_escrow_validates_shipping_window() {
         &(MAX_SHIPPING_WINDOW + 1),
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(above_max, Err(Ok(ContractError::InvalidShippingWindow)));
 
@@ -1304,6 +1322,7 @@ fn create_basket_escrow_validates_shipping_window() {
         &SHIPPING_WINDOW,
         &None::<soroban_sdk::String>,
         &None::<u64>,
+        &0_u64,
     );
     assert_eq!(
         client.get_escrow(&escrow_id).shipping_window,

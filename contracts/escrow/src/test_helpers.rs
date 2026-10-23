@@ -1,4 +1,3 @@
-pub mod payout;
 #![cfg(test)]
 #![allow(dead_code)]
 

@@ -1339,15 +1339,9 @@ impl Escrow {
     /// `fund_escrow` uses). Must be funded with `fund_basket_escrow`.
     /// Emits `basket_escrow_created`.
     ///
-    /// Unlike `create_escrow_with_expiration`, there is no `grace_period`
-    /// parameter here: basket escrows always get `grace_period = 0`, i.e. no
-    /// buffer past `expires_at` before `reclaim_expired` can act. This isn't
-    /// a deliberate basket-specific restriction — `grace_period` exists to
-    /// protect a fund/ship transaction that's still landing right at the
-    /// deadline, which applies just as much to baskets — it's simply not
-    /// wired up yet. A caller that needs a grace window for a basket escrow
-    /// has no way to get one today; adding a `grace_period: u64` parameter
-    /// here, mirroring `create_escrow_with_expiration`, is the known fix.
+    /// `notes` is optional and is capped at `MAX_NOTES_LEN`. `expires_at` and
+    /// `grace_period` follow the same expiration semantics as
+    /// `create_escrow_with_expiration`.
     #[allow(clippy::too_many_lines)]
     pub fn create_basket_escrow(
         env: Env,
@@ -1358,10 +1352,9 @@ impl Escrow {
         amounts: soroban_sdk::Vec<i128>,
         fee_bps: u32,
         shipping_window: u64,
-        expires_at: Option<u64>,
-        grace_period: u64,
         notes: Option<String>,
         expires_at: Option<u64>,
+        grace_period: u64,
     ) -> Result<u64, ContractError> {
         auth!(seller);
         ensure_action_not_paused(&env, Symbol::new(&env, "create_basket_escrow"))?;
@@ -1605,7 +1598,6 @@ impl Escrow {
         }
 
         crate::internal::ensure_funding_not_expired(&env, escrow_id)?;
-        let now = env.ledger().timestamp();
 
         // Security: buyer must differ from every payee (seller) and every
         // resolver in the set. Mirrors the identical check in fund_escrow and

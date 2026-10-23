@@ -199,25 +199,8 @@ pub(crate) fn read_fee_config(env: &Env) -> FeeConfig {
     crate::storage::read_fee_config(env)
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct GlobalConfig {
-    pub min_amount: i128,
-    pub max_amount: i128,
-}
-
 pub(crate) fn read_global_config(env: &Env) -> GlobalConfig {
-    GlobalConfig {
-        min_amount: env
-            .storage()
-            .instance()
-            .get(&DataKey::MinAmount)
-            .unwrap_or(MIN_ESCROW_AMOUNT),
-        max_amount: env
-            .storage()
-            .instance()
-            .get(&DataKey::MaxAmount)
-            .unwrap_or(MAX_ESCROW_AMOUNT),
-    }
+    crate::storage::read_global_config(env)
 }
 
 pub(crate) fn write_fee_config(env: &Env, fee_config: &FeeConfig) {
@@ -1355,13 +1338,6 @@ pub(crate) fn create_escrow_internal(
     }
 
     if amount < global_config.min_amount {
-    let max_amount = crate::storage::read_global_config(env).max_amount;
-    if amount > max_amount {
-        return Err(ContractError::AmountExceedsMaximum);
-    }
-
-    let min_amount = crate::storage::read_global_config(env).min_amount;
-    if amount < min_amount {
         return Err(ContractError::AmountBelowMinimum);
     }
 
